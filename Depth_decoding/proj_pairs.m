@@ -1,4 +1,4 @@
-function [select_pairs_all,select_pairs_unique,NeurTT,s1,psf_ratio_new,distance] = proj_pairs(NeurTT_L,NeurTT_R,c_L,c_R,Im_L,Im_R,psf_11,psf_22)
+function [final_combinations,NeurTT] = proj_pairs(NeurTT_L,NeurTT_R,c_L,c_R,Im_L,Im_R,distance,psf_ratio_new,kernel_1,kernel_2)
 %This function is used to find the pairs of neuron from images by Beam 1 and Beam 2
 % All of these neurons distributions ans Ga traces are getting from CNMF code
 % the paris are found by the corrlection of Ga traces and the y positons distance 
@@ -21,15 +21,9 @@ function [select_pairs_all,select_pairs_unique,NeurTT,s1,psf_ratio_new,distance]
 %      final_combinations : selcet neurons
 %      NeurTT            : Ga traces;
 
-%
-% 20240124 - xiaona
-%% psf
-[psf_ratio,kernel_1,kernel_2,distance]=psf_parameters(psf_11,psf_22); % srqt(Im_R)./(sqrt(Im_L)+sqrt(Im_R))
-n_pc=size(psf_ratio,1);
-z=[1:1:size(distance,2)];
-p = polyfit(z, distance, 1);
-distance=polyval(p, z);
 
+%% psf
+E_depth=size(psf_ratio_new,1); % depth decoding range
 min_dis=min(distance);
 max_dis=max(distance);
 
@@ -79,55 +73,6 @@ end
         combinations(hh,4)=R_squared;
     end
 
-    sig_ROIs=combinations(:,4)>0.9;  % select nueron according to R-squared value
-    select_combinations = combinations(sig_ROIs,:);                                       % Isolate significant ROIs
-    [counts, values] = hist(select_combinations(:,1), unique(select_combinations(:,1)));  
-    pairs_1=[];
-    for ii=1:size(values,1)
-        if counts(ii)==1
-            pairs=select_combinations(select_combinations(:,1)==values(ii),:);
-            pairs_1=[pairs_1;pairs];
-        end 
-    end
-%% adjust the upper and lower limits of intensity ratio
-
-    ratio_stack=[];
-    for gg=1:size(pairs_1,1)
-        dis_pairs=pairs_1(gg,3);
-        mask_A=mat2gray(c_L(:,:,pairs_1(gg,1)))>0;
-        mask_B=mat2gray(c_R(:,:,pairs_1(gg,2)))>0;    
-        Flu_A=squeeze(sum(sum(Im_L.*mask_A,1),2));
-        [~,loc_max]=max(Flu_A);
-        img_L=Im_L(:,:,loc_max).*(mask_A>0);
-        if loc_max<2
-            loc_max=2;
-        end
-        img_R=mean(Im_R(:,:,loc_max-1:loc_max+1),3).*(mask_B>0);
-        index_dis=round(min(find(abs(dis_pairs-distance) == min(abs(dis_pairs-distance))))); 
-
-        y1 = conv2(img_L, kernel_2(:,:,index_dis),'same'); % corrcoef
-        y2 = conv2(img_R, kernel_1(:,:,index_dis),'same'); % corrcoef
-        ratio=sqrt(y2)./(sqrt(y1)+sqrt(y2));
-
-        rr= reshape(ratio,1,[]);
-        rr(isinf(rr))=[];rr(rr==0)=[];rr(rr==1)=[];rr(isnan(rr))=[];
-        ratio_pairs_all(gg,1)=most_Element(rr);
-        ratio_stack=cat(3,ratio_stack,ratio);
-    end
-
-    ratio_stack(ratio_stack==0)=nan;
-    aa=reshape(ratio_stack,[],1);
-    aa(isnan(aa))=[];
-    aa1=sort(aa);
-    [limit_floor_1,limit_ceil_1]=ratiorange(aa1);
-
-    index_min=round(min(find(abs(min(pairs_1(:,3))-distance) == min(abs(min(pairs_1(:,3))-distance))))); % depth get from distance
-    index_max=round(min(find(abs(max(pairs_1(:,3))-distance) == min(abs(max(pairs_1(:,3))-distance))))); % depth get from distance
-
-    limit_new=interp1([index_min,index_max],[limit_floor_1,limit_ceil_1],(1:n_pc),'spline');
-    psf_ratio_Max=max(limit_new);
-    psf_ratio_Min=min(limit_new);
-    psf_ratio_new = ((psf_ratio - min(psf_ratio)) * (psf_ratio_Max - psf_ratio_Min)) / (max(psf_ratio) - min(psf_ratio)) + psf_ratio_Min;
 
 %%  select true proj pairs by Ga traces 
 select_pairs_all = select_proj_pairs(combinations,kernel_1,kernel_2,distance,psf_ratio_new,c_L,c_R,Im_L,Im_R,NeurTT_L,NeurTT_R);
@@ -192,11 +137,15 @@ for gg=1:size(select_pairs_unique,1)
             end
             iterations=iterations+1;
             min_index=max(1,min_index-2);
-            max_index=min(max_index+2,n_pc);
+            max_index=min(max_index+2,E_depth);
         end
     end
     select_pairs_unique(gg,6)=index;
 end
-s1=[];
+ROI_final=select_pairs_unique(:,6)>0;
+final_combinations=select_pairs_unique(ROI_final,:);
+NeurTT=NeurTT(ROI_final,:);
+final_combinations(:,6)=max(E_depth-final_combinations(:,6),1);
+
 end
 
